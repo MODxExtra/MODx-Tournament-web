@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login · FIRE ARENA</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="auth-card card">
+    <a class="logo" href="/" style="margin-bottom:20px;display:flex"><span class="dot"></span><span class="grad">FIRE ARENA</span></a>
+    <div class="auth-tabs">
+      <button id="tabLogin" class="active">Login</button>
+      <button id="tabReg">Register</button>
+    </div>
+
+    <!-- Login -->
+    <form id="loginForm">
+      <div class="field"><label>Email</label><input type="email" name="email" required></div>
+      <div class="field"><label>Password</label><input type="password" name="password" required></div>
+      <button class="btn primary" style="width:100%">Login</button>
+    </form>
+
+    <!-- Register -->
+    <form id="regForm" class="hidden">
+      <div class="field"><label>Email</label><input type="email" name="email" required placeholder="you@gmail.com"><div class="hint">Real email — MX verified + verification code sent.</div></div>
+      <div class="field"><label>Phone</label><input name="phone" required placeholder="10–15 digits"></div>
+      <div class="field"><label>In-Game Name (IGN)</label><input name="ign" required></div>
+      <div class="field"><label>Free Fire UID</label><input name="game_uid" required></div>
+      <div class="field"><label>Password</label><input type="password" name="password" required minlength="6"></div>
+      <button class="btn primary" style="width:100%">Create Account</button>
+    </form>
+
+    <!-- Verify -->
+    <form id="verifyForm" class="hidden">
+      <p style="color:var(--muted);font-size:13.5px">A 6-digit code was sent to <b id="verifyEmail"></b>.</p>
+      <div class="field"><label>Verification Code</label><input name="code" required maxlength="6" inputmode="numeric"></div>
+      <button class="btn primary" style="width:100%">Verify</button>
+      <button type="button" class="btn ghost" id="resendBtn" style="width:100%;margin-top:8px">Resend Code</button>
+    </form>
+  </div>
+</div>
+
+<script src="/js/api.js"></script>
+<script>
+  const tabLogin = document.getElementById('tabLogin');
+  const tabReg = document.getElementById('tabReg');
+  const loginForm = document.getElementById('loginForm');
+  const regForm = document.getElementById('regForm');
+  const verifyForm = document.getElementById('verifyForm');
+  let pendingEmail = '';
+
+  function show(which) {
+    [loginForm, regForm, verifyForm].forEach(f => f.classList.add('hidden'));
+    which.classList.remove('hidden');
+    tabLogin.classList.toggle('active', which !== regForm);
+    tabReg.classList.toggle('active', which === regForm);
+  }
+
+  tabLogin.onclick = () => show(loginForm);
+  tabReg.onclick = () => show(regForm);
+
+  if (location.hash === '#register') show(regForm);
+
+  loginForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const r = await API.post('/api/auth/login', Object.fromEntries(fd));
+      API.setToken(r.token); API.setUser(r.user);
+      toast('Welcome back!', 'success');
+      location.href = r.user.role === 'user' ? '/dashboard.html' : '/admin.html';
+    } catch (err) {
+      if (err.data?.needs_verify) { pendingEmail = fd.get('email'); document.getElementById('verifyEmail').textContent = pendingEmail; show(verifyForm); return; }
+      toast(err.message, 'error');
+    }
+  };
+
+  regForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const r = await API.post('/api/auth/register', Object.fromEntries(fd));
+      pendingEmail = fd.get('email');
+      document.getElementById('verifyEmail').textContent = pendingEmail;
+      show(verifyForm);
+      if (r.dev_mode && r.code) {
+        toast('DEV: code = ' + r.code, 'info');
+        verifyForm.querySelector('[name=code]').value = r.code;
+      } else {
+        toast('Check your email for the code', 'success');
+      }
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
+  verifyForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const code = new FormData(e.target).get('code');
+    try {
+      await API.post('/api/auth/verify', { email: pendingEmail, code });
+      toast('Email verified. Logging in…', 'success');
+      show(loginForm);
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
+  document.getElementById('resendBtn').onclick = async () => {
+    try {
+      const r = await API.post('/api/auth/resend', { email: pendingEmail });
+      if (r.dev_mode && r.code) { toast('DEV code: ' + r.code, 'info'); verifyForm.querySelector('[name=code]').value = r.code; }
+      else toast('Code resent', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  };
+</script>
+</body>
+</html>
