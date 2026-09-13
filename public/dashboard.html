@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard · FIRE ARENA</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a class="logo" href="/"><span class="dot"></span><span class="grad">FIRE ARENA</span></a>
+    <nav class="nav">
+      <a class="btn-ghost" href="/">Home</a>
+      <div class="avatar">
+        <button class="dotbtn" id="avatarBtn">·</button>
+        <div class="menu hidden" id="avatarMenu">
+          <button data-tab="wallet">💳 Add Money</button>
+          <button data-tab="redeem">🎁 Redeem Code</button>
+          <button data-tab="support">🆘 Support / Report Bug</button>
+          <button data-tab="tickets">📩 My Tickets</button>
+          <hr>
+          <button id="logoutBtn">🚪 Logout</button>
+        </div>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="balance-hero" style="margin-bottom:24px">
+    <div>
+      <div class="lbl">Wallet Balance</div>
+      <div class="amt" id="bal">₹0.00</div>
+      <div style="color:var(--muted);font-size:13px" id="who"></div>
+    </div>
+    <button class="btn primary" data-tab="wallet">+ Add Money</button>
+  </div>
+
+  <div class="tabs">
+    <button class="active" data-tab="overview">Overview</button>
+    <button data-tab="my">My Tournaments</button>
+    <button data-tab="wallet">Wallet</button>
+    <button data-tab="redeem">Redeem</button>
+    <button data-tab="tickets">Tickets</button>
+  </div>
+
+  <div id="panel"></div>
+</main>
+
+<div id="modal-host"></div>
+
+<script src="/js/api.js"></script>
+<script>
+(async function () {
+  const u = API.user();
+  if (!u) { location.href = '/auth.html'; return; }
+
+  document.getElementById('avatarBtn').textContent = (u.ign || u.email)[0].toUpperCase();
+  document.getElementById('who').textContent = u.ign + ' · ' + u.email;
+  const btn = document.getElementById('avatarBtn');
+  const menu = document.getElementById('avatarMenu');
+  btn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
+  document.addEventListener('click', () => menu.classList.add('hidden'));
+  document.getElementById('logoutBtn').onclick = API.logout;
+
+  let cfg = { settings: {} };
+  try { cfg = await API.get('/api/settings'); } catch {}
+
+  async function refreshBal() {
+    const { balance } = await API.get('/api/user/wallet');
+    document.getElementById('bal').textContent = fmtMoney(balance);
+    u.balance = balance; API.setUser(u);
+  }
+  await refreshBal();
+
+  const panel = document.getElementById('panel');
+  const tabs = document.querySelectorAll('.tabs button, .menu button[data-tab], .balance-hero [data-tab]');
+
+  function setActive(name) {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  }
+
+  async function render(name) {
+    setActive(name);
+    panel.innerHTML = '<div class="empty">Loading…</div>';
+    try {
+      if (name === 'overview') return renderOverview();
+      if (name === 'my') return renderMy();
+      if (name === 'wallet') return renderWallet();
+      if (name === 'redeem') return renderRedeem();
+      if (name === 'tickets') return renderTickets();
+    } catch (e) { panel.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  async function renderOverview() {
+    const [{ notices }, { tournaments: mine }] = await Promise.all([
+      API.get('/api/notices'), API.get('/api/user/my-tournaments')
+    ]);
+    panel.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin:0 0 12px">📢 Notices</h3>
+        ${notices.length ? notices.slice(0,5).map(n => `
+          <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+            <span class="badge ${n.type}">${n.type}</span>
+            <b style="margin-left:8px">${esc(n.title)}</b>
+            ${n.body ? `<div style="color:var(--muted);font-size:13px;margin-top:4px">${esc(n.body)}</div>` : ''}
+          </div>`).join('') : '<div class="empty">No notices.</div>'}
+      </div>
+      <div class="card">
+        <h3 style="margin:0 0 12px">🎮 My Tournaments (${mine.length})</h3>
+        ${mine.length ? `<table class="tbl"><thead><tr><th>Name</th><th>Entry</th><th>Status</th><th>Joined</th></tr></thead><tbody>
+          ${mine.map(t => `<tr><td>${esc(t.name)}</td><td>${t.entry_fee > 0 ? fmtMoney(t.entry_fee) : 'FREE'}</td><td><span class="badge ${t.status}">${t.status}</span></td><td>${fmtTime(t.joined_at)}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty">You haven\'t joined any tournaments yet.</div>'}
+      </div>`;
+  }
+
+  async function renderMy() {
+    const { tournaments } = await API.get('/api/user/my-tournaments');
+    panel.innerHTML = `
+      <div class="card">
+        <h3 style="margin:0 0 12px">My Tournaments</h3>
+        ${tournaments.length ? `<table class="tbl"><thead><tr><th>Name</th><th>Prize</th><th>Entry</th><th>Status</th><th>Joined</th></tr></thead><tbody>
+          ${tournaments.map(t => `<tr><td>${esc(t.name)}</td><td>${esc(t.prize||'—')}</td><td>${t.entry_fee>0?fmtMoney(t.entry_fee):'FREE'}</td><td><span class="badge ${t.status}">${t.status}</span></td><td>${fmtTime(t.joined_at)}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No tournaments yet. <a href="/" style="color:#ffb27a">Browse →</a></div>'}
+      </div>`;
+  }
+
+  async function renderWallet() {
+    const { transactions } = await API.get('/api/user/transactions');
+    const { deposits } = await API.get('/api/user/deposits');
+    const s = cfg.settings;
+    const qr = s['pay.qr_url'] || '';
+    panel.innerHTML = `
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div class="card">
+          <h3 style="margin:0 0 12px">💳 Add Money</h3>
+          ${qr ? `<div class="qr-box" style="margin-bottom:14px">
+            <img src="${esc(qr)}" alt="QR">
+            <div>
+              <div style="font-size:12px;color:var(--muted);text-transform:uppercase;font-weight:700">UPI ID</div>
+              <div style="font-weight:700;font-size:15px;margin-bottom:6px">${esc(s['pay.upi_id']||'—')}</div>
+              <div style="font-size:12px;color:var(--muted)">Name: ${esc(s['pay.name']||'—')}</div>
+            </div>
+          </div>` : `<div class="qr-box" style="margin-bottom:14px"><div>UPI: <b>${esc(s['pay.upi_id']||'—')}</b><br><span style="color:var(--muted);font-size:12px">${esc(s['pay.name']||'')}</span></div></div>`}
+          <p style="color:var(--muted);font-size:12.5px">${esc(s['pay.instructions']||'')}</p>
+          <form id="depForm">
+            <div class="field"><label>Amount (₹)</label><input type="number" name="amount" min="${s['pay.min_deposit']||1}" step="1" required></div>
+            <div class="field"><label>UTR / Transaction ID</label><input name="utr" required minlength="6"></div>
+            <div class="field"><label>Payment Screenshot</label><input type="file" name="screenshot" accept="image/*" required></div>
+            <button class="btn primary" style="width:100%">Submit for Approval</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3 style="margin:0 0 12px">📜 Transactions</h3>
+          ${transactions.length ? `<table class="tbl"><thead><tr><th>Type</th><th>Amount</th><th>Note</th><th>When</th></tr></thead><tbody>
+            ${transactions.map(t => `<tr><td>${esc(t.type)}</td><td style="color:${t.amount<0?'#fca5a5':'#86efac'};font-weight:700">${t.amount<0?'-':'+'}${fmtMoney(Math.abs(t.amount))}</td><td style="color:var(--muted)">${esc(t.note||'')}</td><td style="color:var(--muted);font-size:12px">${fmtTime(t.created_at)}</td></tr>`).join('')}
+          </tbody></table>` : '<div class="empty">No transactions yet.</div>'}
+          <h4 style="margin:20px 0 8px">Recent Deposits</h4>
+          ${deposits.length ? `<table class="tbl"><thead><tr><th>Amount</th><th>Status</th><th>UTR</th><th>When</th></tr></thead><tbody>
+            ${deposits.map(d => `<tr><td>${fmtMoney(d.amount)}</td><td><span class="badge ${d.status}">${d.status}</span></td><td style="color:var(--muted);font-size:12px">${esc(d.utr)}</td><td style="color:var(--muted);font-size:12px">${fmtTime(d.created_at)}</td></tr>`).join('')}
+          </tbody></table>` : '<div class="empty">No deposits yet.</div>'}
+        </div>
+      </div>`;
+
+    document.getElementById('depForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try {
+        await API.postForm('/api/user/deposit', fd);
+        toast('Submitted. Admin will review shortly.', 'success');
+        render('wallet');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  }
+
+  async function renderRedeem() {
+    panel.innerHTML = `
+      <div class="card" style="max-width:520px">
+        <h3 style="margin:0 0 12px">🎁 Redeem Code</h3>
+        <form id="redeemForm">
+          <div class="field"><label>Enter Code</label><input name="code" required placeholder="FFXXXXXX" style="text-transform:uppercase"></div>
+          <button class="btn primary" style="width:100%">Redeem</button>
+        </form>
+      </div>`;
+    document.getElementById('redeemForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const code = new FormData(e.target).get('code');
+      try {
+        const r = await API.post('/api/user/redeem', { code });
+        toast('+' + fmtMoney(r.amount) + ' added!', 'success');
+        await refreshBal(); e.target.reset();
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  }
+
+  async function renderTickets() {
+    const { tickets } = await API.get('/api/user/tickets');
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="margin:0">Support Tickets</h3>
+        <button class="btn primary" id="newTicketBtn">+ New Ticket</button>
+      </div>
+      <div class="card">
+        ${tickets.length ? `<table class="tbl"><thead><tr><th>#</th><th>Subject</th><th>Category</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+          ${tickets.map(t => `<tr data-id="${t.id}" style="cursor:pointer"><td>#${t.id}</td><td>${esc(t.subject)}</td><td>${esc(t.category||'')}</td><td><span class="badge ${t.status==='closed'?'closed':'open'}">${t.status}</span></td><td style="color:var(--muted);font-size:12px">${fmtTime(t.updated_at)}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No tickets yet. Facing a bug? Open one →</div>'}
+      </div>`;
+
+    document.getElementById('newTicketBtn').onclick = () => newTicketModal();
+    panel.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openTicket(tr.dataset.id));
+  }
+
+  function newTicketModal() {
+    const host = document.getElementById('modal-host');
+    host.innerHTML = `
+      <div class="modal-host" onclick="if(event.target===this)this.remove()">
+        <div class="modal">
+          <h3 style="margin:0 0 14px">New Support Ticket</h3>
+          <form id="ntForm">
+            <div class="field"><label>Subject</label><input name="subject" required></div>
+            <div class="field"><label>Category</label>
+              <select name="category">
+                <option value="bug">Bug Report</option>
+                <option value="payment">Payment Issue</option>
+                <option value="account">Account Issue</option>
+                <option value="tournament">Tournament Issue</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="field"><label>Message</label><textarea name="message" required></textarea></div>
+            <div style="display:flex;gap:10px">
+              <button class="btn primary" style="flex:1">Submit</button>
+              <button type="button" class="btn ghost" onclick="this.closest('.modal-host').remove()">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+    document.getElementById('ntForm').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await API.post('/api/user/tickets', Object.fromEntries(new FormData(e.target)));
+        toast('Ticket opened', 'success');
+        host.innerHTML = '';
+        render('tickets');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  }
+
+  async function openTicket(id) {
+    const { ticket, messages } = await API.get('/api/user/tickets/' + id);
+    const host = document.getElementById('modal-host');
+    host.innerHTML = `
+      <div class="modal-host" onclick="if(event.target===this)this.remove()">
+        <div class="modal">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h3 style="margin:0">#${ticket.id} · ${esc(ticket.subject)}</h3>
+            <span class="badge ${ticket.status==='closed'?'closed':'open'}">${ticket.status}</span>
+          </div>
+          <div class="chat" id="chat">
+            ${messages.map(m => `<div class="msg ${m.sender_role==='user'?'user':'admin'}"><div class="who">${m.sender_role==='user'?'You':m.sender_role}</div>${esc(m.message)}</div>`).join('')}
+          </div>
+          ${ticket.status==='open' ? `
+          <form id="msgForm" style="margin-top:14px">
+            <div class="field"><textarea name="message" placeholder="Type a reply…" required></textarea></div>
+            <button class="btn primary">Send</button>
+          </form>` : '<p style="color:var(--muted);font-size:13px;margin-top:12px">This ticket is closed.</p>'}
+          <button class="btn ghost" style="width:100%;margin-top:10px" onclick="this.closest('.modal-host').remove()">Close</button>
+        </div>
+      </div>`;
+    document.getElementById('chat').scrollTop = 99999;
+    const mf = document.getElementById('msgForm');
+    if (mf) mf.onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = new FormData(e.target).get('message');
+      try { await API.post('/api/user/tickets/' + id + '/message', { message: msg }); openTicket(id); }
+      catch (err) { toast(err.message, 'error'); }
+    };
+  }
+
+  tabs.forEach(b => b.onclick = (e) => {
+    e.preventDefault();
+    const name = b.dataset.tab;
+    if (!name) return;
+    menu.classList.add('hidden');
+    render(name);
+  });
+
+  const hash = location.hash.replace('#','') || 'overview';
+  render(hash);
+})();
+</script>
+</body>
+</html>
