@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FIRE ARENA — Free Fire Tournaments</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a class="logo" href="/"><span class="dot"></span><span class="grad" id="siteName">FIRE ARENA</span></a>
+    <nav class="nav" id="nav">
+      <a class="btn-ghost" href="#tournaments">Tournaments</a>
+      <a class="btn-ghost" href="#notices">Notices</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>Enter the Arena.<br>Dominate Free Fire.</h1>
+    <p class="sub" id="siteTagline">Play daily paid & free tournaments. Win real cash. Cash out fast.</p>
+    <div class="cta">
+      <a href="/auth.html" class="btn primary" id="ctaMain">Join Now →</a>
+      <a href="#tournaments" class="btn">Browse Tournaments</a>
+    </div>
+  </section>
+
+  <section class="notice-strip" id="notices"></section>
+
+  <section class="section" id="tournaments">
+    <div class="section-head">
+      <h2>Live & Upcoming Tournaments</h2>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+</main>
+
+<div id="modal-host"></div>
+
+<script src="/js/api.js"></script>
+<script>
+(async function () {
+  const cfg = await API.get('/api/settings').catch(() => ({ settings: {} }));
+  if (cfg.settings['site.name']) document.getElementById('siteName').textContent = cfg.settings['site.name'];
+  if (cfg.settings['site.tagline']) document.getElementById('siteTagline').textContent = cfg.settings['site.tagline'];
+
+  const u = API.user();
+  const nav = document.getElementById('nav');
+  const cta = document.getElementById('ctaMain');
+
+  if (u) {
+    cta.textContent = 'Go to Dashboard →';
+    cta.href = '/dashboard.html';
+    nav.insertAdjacentHTML('beforeend', `
+      <div class="avatar">
+        <button class="dotbtn" id="avatarBtn">${(u.ign || u.email)[0].toUpperCase()}</button>
+        <div class="menu hidden" id="avatarMenu">
+          <button data-go="/dashboard.html">👤 Dashboard</button>
+          <button data-go="/dashboard.html#wallet">💳 Wallet</button>
+          <button data-go="/dashboard.html#support">🆘 Support</button>
+          <button id="logoutBtn">🚪 Logout</button>
+        </div>
+      </div>`);
+    const btn = document.getElementById('avatarBtn');
+    const menu = document.getElementById('avatarMenu');
+    btn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
+    document.addEventListener('click', () => menu.classList.add('hidden'));
+    menu.querySelectorAll('[data-go]').forEach(b => b.onclick = () => location.href = b.dataset.go);
+    document.getElementById('logoutBtn').onclick = API.logout;
+  } else {
+    nav.insertAdjacentHTML('beforeend', `
+      <a href="/auth.html" class="btn-ghost">Login</a>
+      <a href="/auth.html#register" class="btn primary sm">Sign Up</a>`);
+  }
+
+  // Notices
+  const { notices } = await API.get('/api/notices');
+  const nhost = document.getElementById('notices');
+  if (notices.length) {
+    nhost.innerHTML = notices.slice(0, 3).map(n => `
+      <div class="notice">
+        <span class="badge ${n.type}">${n.type}</span>
+        <div><b>${esc(n.title)}</b>${n.body ? `<p>${esc(n.body)}</p>` : ''}</div>
+      </div>`).join('');
+  }
+
+  // Tournaments
+  const { tournaments } = await API.get('/api/tournaments');
+  document.getElementById('count').textContent = tournaments.length + ' total';
+  const grid = document.getElementById('grid');
+  if (!tournaments.length) { grid.innerHTML = '<div class="empty">No tournaments yet — check back soon.</div>'; return; }
+
+  grid.innerHTML = tournaments.map(t => `
+    <div class="tcard" data-id="${t.id}">
+      <div class="thumb" style="background-image:url('${t.thumbnail || ''}')">
+        <span class="status ${t.status}">${t.status}</span>
+        <span class="fee">${t.entry_fee > 0 ? '₹' + t.entry_fee : 'FREE'}</span>
+      </div>
+      <div class="body">
+        <h3>${esc(t.name)}</h3>
+        <div class="meta">
+          ${t.mode ? `<span>${esc(t.mode)}</span>` : ''}
+          ${t.map ? `<span>${esc(t.map)}</span>` : ''}
+          <span>${t.joined}/${t.slots} joined</span>
+        </div>
+        <div class="row">
+          <div class="prize">🏆 ${esc(t.prize || '—')}</div>
+          <div class="joined">${fmtTime(t.start_time)}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  grid.querySelectorAll('.tcard').forEach(c => c.onclick = () => openTournament(c.dataset.id));
+
+  async function openTournament(id) {
+    const { tournament: t, participants } = await API.get('/api/tournaments/' + id);
+    const host = document.getElementById('modal-host');
+    const canJoin = ['upcoming','live'].includes(t.status) && participants.length < t.slots;
+    host.innerHTML = `
+      <div class="modal-host" onclick="if(event.target===this)this.remove()">
+        <div class="modal">
+          <div style="aspect-ratio:16/9;border-radius:12px;background:#111 center/cover no-repeat;background-image:url('${t.thumbnail || ''}');border:1px solid var(--line);margin-bottom:16px"></div>
+          <h2 style="margin:0 0 6px">${esc(t.name)}</h2>
+          <div style="color:var(--muted);font-size:13px;margin-bottom:12px">
+            ${esc(t.mode || '')} ${t.map ? '· ' + esc(t.map) : ''} · ${participants.length}/${t.slots} slots · ${fmtTime(t.start_time)}
+          </div>
+          <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+            <span class="badge ${t.status}">${t.status}</span>
+            <span class="badge info">Entry: ${t.entry_fee > 0 ? '₹' + t.entry_fee : 'FREE'}</span>
+            <span class="badge warn">🏆 ${esc(t.prize || '—')}</span>
+          </div>
+          ${t.description ? `<p style="color:#cfcfdd;font-size:14px;line-height:1.6">${esc(t.description)}</p>` : ''}
+          ${t.rules ? `<details style="margin:12px 0"><summary style="cursor:pointer;color:#ffb27a;font-weight:600">📜 Rules</summary><pre style="white-space:pre-wrap;color:#cfcfdd;font-size:13px;font-family:inherit">${esc(t.rules)}</pre></details>` : ''}
+          <div style="display:flex;gap:10px;margin-top:18px">
+            ${canJoin ? `<button class="btn primary" id="joinBtn">Join Now ${t.entry_fee > 0 ? '· ₹' + t.entry_fee : '· FREE'}</button>` : '<button class="btn" disabled>' + (participants.length >= t.slots ? 'Slots Full' : 'Not Joinable') + '</button>'}
+            <button class="btn ghost" onclick="this.closest('.modal-host').remove()">Close</button>
+          </div>
+        </div>
+      </div>`;
+
+    const jb = document.getElementById('joinBtn');
+    if (jb) jb.onclick = async () => {
+      if (!API.user()) { location.href = '/auth.html'; return; }
+      try {
+        await API.post('/api/user/tournaments/' + t.id + '/join', {});
+        toast('Joined successfully!', 'success');
+        setTimeout(() => location.reload(), 700);
+      } catch (e) { toast(e.message, 'error'); }
+    };
+  }
+})();
+</script>
+</body>
+</html>
