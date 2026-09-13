@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin · FIRE ARENA</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <a class="logo" href="/"><span class="dot"></span><span class="grad">FIRE ARENA</span> <span style="font-size:11px;color:#ffb27a;margin-left:6px;letter-spacing:1px">ADMIN</span></a>
+    <nav class="nav">
+      <a class="btn-ghost" href="/">View Site</a>
+      <div class="avatar">
+        <button class="dotbtn" id="avatarBtn">A</button>
+        <div class="menu hidden" id="avatarMenu">
+          <button id="logoutBtn">🚪 Logout</button>
+        </div>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="admin-grid">
+    <aside class="side card" id="side">
+      <button data-tab="dash" class="active">📊 Dashboard</button>
+      <button data-tab="tournaments">🏆 Tournaments</button>
+      <button data-tab="deposits">💰 Deposits</button>
+      <button data-tab="redeem">🎁 Redeem Codes</button>
+      <button data-tab="tickets">🆘 Tickets</button>
+      <button data-tab="notices">📢 Notices</button>
+      <button data-tab="users">👥 Users</button>
+      <button data-tab="settings">⚙️ Settings</button>
+      <button data-tab="admins" id="adminsTab">🛡️ Admins</button>
+    </aside>
+    <section id="panel"></section>
+  </div>
+</main>
+
+<div id="modal-host"></div>
+
+<script src="/js/api.js"></script>
+<script>
+(async function () {
+  const me = API.user();
+  if (!me || !['admin','owner'].includes(me.role)) { location.href = '/auth.html'; return; }
+  document.getElementById('avatarBtn').textContent = (me.ign || me.email)[0].toUpperCase();
+  const btn = document.getElementById('avatarBtn');
+  const menu = document.getElementById('avatarMenu');
+  btn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); };
+  document.addEventListener('click', () => menu.classList.add('hidden'));
+  document.getElementById('logoutBtn').onclick = API.logout;
+
+  if (me.role !== 'owner') document.getElementById('adminsTab').style.display = 'none';
+
+  const panel = document.getElementById('panel');
+  const sideBtns = document.querySelectorAll('.side button');
+
+  function setActive(name) {
+    sideBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  }
+
+  async function render(name) {
+    setActive(name);
+    panel.innerHTML = '<div class="empty">Loading…</div>';
+    try {
+      if (name === 'dash') return renderDash();
+      if (name === 'tournaments') return renderTournaments();
+      if (name === 'deposits') return renderDeposits();
+      if (name === 'redeem') return renderRedeem();
+      if (name === 'tickets') return renderTickets();
+      if (name === 'notices') return renderNotices();
+      if (name === 'users') return renderUsers();
+      if (name === 'settings') return renderSettings();
+      if (name === 'admins') return renderAdmins();
+    } catch (e) { panel.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  // Dashboard
+  async function renderDash() {
+    const [{ users }, { tournaments }, { deposits }] = await Promise.all([
+      API.get('/api/admin/users'),
+      API.get('/api/tournaments'),
+      API.get('/api/admin/deposits?status=pending')
+    ]);
+    const totalBal = users.reduce((s,u)=>s+Number(u.balance||0),0);
+    panel.innerHTML = `
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        <div class="card"><div class="lbl" style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:700">Users</div><div style="font-size:30px;font-weight:800">${users.length}</div></div>
+        <div class="card"><div class="lbl" style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:700">Tournaments</div><div style="font-size:30px;font-weight:800">${tournaments.length}</div></div>
+        <div class="card"><div class="lbl" style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:700">Pending Deposits</div><div style="font-size:30px;font-weight:800;color:#fbbf24">${deposits.length}</div></div>
+        <div class="card"><div class="lbl" style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:700">Total Wallet</div><div style="font-size:30px;font-weight:800;color:#86efac">${fmtMoney(totalBal)}</div></div>
+      </div>`;
+  }
+
+  // Tournaments
+  async function renderTournaments() {
+    const { tournaments } = await API.get('/api/tournaments');
+    panel.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h2 style="margin:0">Tournaments</h2>
+        <button class="btn primary" id="newT">+ New Tournament</button>
+      </div>
+      <div class="card">
+        ${tournaments.length ? `<table class="tbl"><thead><tr><th>#</th><th>Name</th><th>Entry</th><th>Prize</th><th>Slots</th><th>Status</th><th>Start</th><th></th></tr></thead><tbody>
+          ${tournaments.map(t => `<tr>
+            <td>${t.id}</td>
+            <td><b>${esc(t.name)}</b></td>
+            <td>${t.entry_fee>0?fmtMoney(t.entry_fee):'FREE'}</td>
+            <td>${esc(t.prize||'—')}</td>
+            <td>${t.joined}/${t.slots}</td>
+            <td><span class="badge ${t.status}">${t.status}</span></td>
+            <td style="color:var(--muted);font-size:12px">${fmtTime(t.start_time)}</td>
+            <td style="white-space:nowrap">
+              <button class="btn sm" data-edit="${t.id}">Edit</button>
+              <button class="btn sm danger" data-del="${t.id}">Del</button>
+            </td>
+          </tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No tournaments yet.</div>'}
+      </div>`;
+    document.getElementById('newT').onclick = () => tournamentModal();
+    panel.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => tournamentModal(tournaments.find(x=>x.id==b.dataset.edit)));
+    panel.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Delete tournament #'+b.dataset.del+'?')) return;
+      await API.del('/api/admin/tournaments/'+b.dataset.del);
+      toast('Deleted','success'); render('tournaments');
+    });
+  }
+
+  function tournamentModal(t = {}) {
+    const isEdit = !!t.id;
+    const host = document.getElementById('modal-host');
+    host.innerHTML = `
+      <div class="modal-host" onclick="if(event.target===this)this.remove()">
+        <div class="modal">
+          <h3 style="margin:0 0 14px">${isEdit?'Edit':'Create'} Tournament</h3>
+          <form id="tForm">
+            <div class="field"><label>Name</label><input name="name" required value="${esc(t.name||'')}"></div>
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label>Entry Fee (₹, 0=free)</label><input type="number" name="entry_fee" min="0" step="1" value="${t.entry_fee||0}"></div>
+              <div class="field"><label>Prize (text)</label><input name="prize" value="${esc(t.prize||'')}" placeholder="₹500 or Custom"></div>
+            </div>
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label>Mode</label><input name="mode" value="${esc(t.mode||'Solo')}"></div>
+              <div class="field"><label>Map</label><input name="map" value="${esc(t.map||'Bermuda')}"></div>
+            </div>
+            <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label>Slots</label><input type="number" name="slots" min="1" value="${t.slots||48}"></div>
+              <div class="field"><label>Status</label>
+                <select name="status">
+                  ${['upcoming','live','completed','cancelled'].map(s=>`<option ${t.status===s?'selected':''}>${s}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="field"><label>Start Time</label><input type="datetime-local" name="start_time" value="${t.start_time?t.start_time.slice(0,16):''}"></div>
+            <div class="field"><label>Thumbnail — Upload File</label><input type="file" name="thumbnail" accept="image/*"></div>
+            <div class="field"><label>…or Thumbnail URL</label><input name="thumbnail_url" placeholder="https://…" value="${esc(t.thumbnail||'')}"></div>
+            <div class="field"><label>Description</label><textarea name="description">${esc(t.description||'')}</textarea></div>
+            <div class="field"><label>Rules</label><textarea name="rules">${esc(t.rules||'')}</textarea></div>
+            <div style="display:flex;gap:10px">
+              <button class="btn primary" style="flex:1">${isEdit?'Save':'Create'}</button>
+              <button type="button" class="btn ghost" onclick="this.closest('.modal-host').remove()">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+    document.getElementById('tForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      // clean empty fields
+      for (const [k,v] of [...fd.entries()]) if (v === '' && k !== 'entry_fee' && k !== 'slots') fd.delete(k);
+      try {
+        if (isEdit) await API.putForm('/api/admin/tournaments/'+t.id, fd);
+        else await API.postForm('/api/admin/tournaments', fd);
+        toast('Saved','success');
+        host.innerHTML = '';
+        render('tournaments');
+      } catch (err) { toast(err.message,'error'); }
+    };
+  }
+
+  // Deposits
+  async function renderDeposits() {
+    const { deposits } = await API.get('/api/admin/deposits');
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Deposits</h2>
+      <div class="card">
+        ${deposits.length ? `<table class="tbl"><thead><tr><th>#</th><th>User</th><th>Amount</th><th>UTR</th><th>Proof</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>
+          ${deposits.map(d => `<tr>
+            <td>${d.id}</td>
+            <td>${esc(d.ign||'')}<div style="color:var(--muted);font-size:11px">${esc(d.email)}</div></td>
+            <td><b>${fmtMoney(d.amount)}</b></td>
+            <td style="font-family:monospace;font-size:12px">${esc(d.utr)}</td>
+            <td><a href="${esc(d.screenshot)}" target="_blank" style="color:#ffb27a">View</a></td>
+            <td><span class="badge ${d.status}">${d.status}</span></td>
+            <td style="color:var(--muted);font-size:11px">${fmtTime(d.created_at)}</td>
+            <td style="white-space:nowrap">${d.status==='pending'?`
+              <button class="btn sm primary" data-ok="${d.id}">Approve</button>
+              <button class="btn sm danger" data-no="${d.id}">Reject</button>`:''}</td>
+          </tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No deposits yet.</div>'}
+      </div>`;
+    panel.querySelectorAll('[data-ok]').forEach(b => b.onclick = async () => {
+      if (!confirm('Approve deposit #'+b.dataset.ok+'?')) return;
+      await API.post('/api/admin/deposits/'+b.dataset.ok+'/approve', {});
+      toast('Approved','success'); render('deposits');
+    });
+    panel.querySelectorAll('[data-no]').forEach(b => b.onclick = async () => {
+      const note = prompt('Rejection reason (optional)') || '';
+      await API.post('/api/admin/deposits/'+b.dataset.no+'/reject', { note });
+      toast('Rejected','success'); render('deposits');
+    });
+  }
+
+  // Redeem
+  async function renderRedeem() {
+    const { codes } = await API.get('/api/admin/redeem');
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Redeem Codes</h2>
+      <div class="card" style="margin-bottom:16px">
+        <h4 style="margin:0 0 10px">Create Code</h4>
+        <form id="rcForm" class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end">
+          <div class="field" style="margin:0"><label>Code (blank=auto)</label><input name="code" placeholder="FFXXXX"></div>
+          <div class="field" style="margin:0"><label>Amount ₹</label><input type="number" name="amount" required min="1"></div>
+          <div class="field" style="margin:0"><label>Max Uses</label><input type="number" name="max_uses" value="1" min="1"></div>
+          <div class="field" style="margin:0"><label>Expires (opt)</label><input type="date" name="expires_at"></div>
+          <button class="btn primary">Create</button>
+        </form>
+      </div>
+      <div class="card">
+        ${codes.length ? `<table class="tbl"><thead><tr><th>#</th><th>Code</th><th>Amount</th><th>Uses</th><th>Expires</th><th>Created</th><th></th></tr></thead><tbody>
+          ${codes.map(c => `<tr>
+            <td>${c.id}</td>
+            <td style="font-family:monospace;font-weight:700">${esc(c.code)}</td>
+            <td>${fmtMoney(c.amount)}</td>
+            <td>${c.uses}/${c.max_uses}</td>
+            <td style="color:var(--muted);font-size:12px">${c.expires_at?fmtTime(c.expires_at):'—'}</td>
+            <td style="color:var(--muted);font-size:11px">${fmtTime(c.created_at)}</td>
+            <td><button class="btn sm danger" data-del="${c.id}">Del</button></td>
+          </tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No codes yet.</div>'}
+      </div>`;
+    document.getElementById('rcForm').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const r = await API.post('/api/admin/redeem', Object.fromEntries(new FormData(e.target)));
+        toast('Code: '+r.code, 'success');
+        render('redeem');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    panel.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Delete code?')) return;
+      await API.del('/api/admin/redeem/'+b.dataset.del);
+      render('redeem');
+    });
+  }
+
+  // Tickets
+  async function renderTickets() {
+    const { tickets } = await API.get('/api/admin/tickets');
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Support Tickets</h2>
+      <div class="card">
+        ${tickets.length ? `<table class="tbl"><thead><tr><th>#</th><th>User</th><th>Subject</th><th>Category</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+          ${tickets.map(t => `<tr data-id="${t.id}" style="cursor:pointer">
+            <td>#${t.id}</td>
+            <td>${esc(t.ign||'')}<div style="color:var(--muted);font-size:11px">${esc(t.email)}</div></td>
+            <td>${esc(t.subject)}</td>
+            <td>${esc(t.category||'')}</td>
+            <td><span class="badge ${t.status==='closed'?'closed':'open'}">${t.status}</span></td>
+            <td style="color:var(--muted);font-size:12px">${fmtTime(t.updated_at)}</td>
+          </tr>`).join('')}
+        </tbody></table>` : '<div class="empty">No tickets.</div>'}
+      </div>`;
+    panel.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openTicket(tr.dataset.id));
+  }
+
+  async function openTicket(id) {
+    const { ticket, messages } = await API.get('/api/admin/tickets/'+id);
+    const host = document.getElementById('modal-host');
+    host.innerHTML = `
+      <div class="modal-host" onclick="if(event.target===this)this.remove()">
+        <div class="modal">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h3 style="margin:0">#${ticket.id} · ${esc(ticket.subject)}</h3>
+            <span class="badge ${ticket.status==='closed'?'closed':'open'}">${ticket.status}</span>
+          </div>
+          <div class="chat" id="chat">
+            ${messages.map(m => `<div class="msg ${m.sender_role==='user'?'user':'admin'}"><div class="who">${m.sender_role==='user'?'USER':m.sender_role}</div>${esc(m.message)}</div>`).join('')}
+          </div>
+          <form id="msgForm" style="margin-top:14px">
+            <div class="field"><textarea name="message" placeholder="Reply…" required></textarea></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn primary">Send</button>
+              <button type="button" class="btn danger" id="closeBtn">Close Ticket</button>
+              <button type="button" class="btn ghost" onclick="this.closest('.modal-host').remove()">Exit</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+    document.getElementById('chat').scrollTop = 99999;
+    document.getElementById('msgForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = new FormData(e.target).get('message');
+      try { await API.post('/api/admin/tickets/'+id+'/message', { message: msg }); openTicket(id); }
+      catch (err) { toast(err.message, 'error'); }
+    };
+    document.getElementById('closeBtn').onclick = async () => {
+      await API.post('/api/admin/tickets/'+id+'/close', {});
+      host.innerHTML = ''; render('tickets');
+    };
+  }
+
+  // Notices
+  async function renderNotices() {
+    const { notices } = await API.get('/api/admin/notices');
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Broadcast Notices</h2>
+      <div class="card" style="margin-bottom:16px">
+        <form id="nForm">
+          <div class="grid" style="grid-template-columns:2fr 1fr;gap:10px">
+            <div class="field" style="margin:0"><label>Title</label><input name="title" required></div>
+            <div class="field" style="margin:0"><label>Type</label>
+              <select name="type"><option>info</option><option>warn</option><option>danger</option></select>
+            </div>
+          </div>
+          <div class="field"><label>Body</label><textarea name="body"></textarea></div>
+          <button class="btn primary">Broadcast</button>
+        </form>
+      </div>
+      <div class="card">
+        ${notices.length ? notices.map(n => `
+          <div style="padding:12px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px">
+            <div>
+              <span class="badge ${n.type}">${n.type}</span>
+              <b style="margin-left:8px">${esc(n.title)}</b>
+              ${n.body ? `<div style="color:var(--muted);font-size:13px;margin-top:4px">${esc(n.body)}</div>`:''}
+              <div style="color:var(--muted);font-size:11px;margin-top:4px">${fmtTime(n.created_at)}</div>
+            </div>
+            <button class="btn sm danger" data-del="${n.id}">Del</button>
+          </div>`).join('') : '<div class="empty">No notices.</div>'}
+      </div>`;
+    document.getElementById('nForm').onsubmit = async (e) => {
+      e.preventDefault();
+      try { await API.post('/api/admin/notices', Object.fromEntries(new FormData(e.target)));
+        toast('Broadcasted', 'success'); render('notices');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    panel.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Delete notice?')) return;
+      await API.del('/api/admin/notices/'+b.dataset.del);
+      render('notices');
+    });
+  }
+
+  // Users
+  async function renderUsers() {
+    const { users } = await API.get('/api/admin/users');
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Users</h2>
+      <div class="card">
+        <table class="tbl"><thead><tr><th>#</th><th>Email</th><th>IGN</th><th>UID</th><th>Balance</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>
+          ${users.map(u => `<tr>
+            <td>${u.id}</td>
+            <td>${esc(u.email)}</td>
+            <td>${esc(u.ign||'')}</td>
+            <td style="font-family:monospace;font-size:12px">${esc(u.game_uid||'')}</td>
+            <td>${fmtMoney(u.balance)}</td>
+            <td><span class="badge ${u.role==='owner'?'danger':u.role==='admin'?'warn':'info'}">${u.role}</span></td>
+            <td>${u.banned?'<span class="badge rejected">banned</span>':'<span class="badge approved">active</span>'}</td>
+            <td>${u.role!=='owner'?`<button class="btn sm ${u.banned?'':'danger'}" data-ban="${u.id}" data-banned="${u.banned?1:0}">${u.banned?'Unban':'Ban'}</button>`:''}</td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`;
+    panel.querySelectorAll('[data-ban]').forEach(b => b.onclick = async () => {
+      const banned = b.dataset.banned === '1';
+      await API.post('/api/admin/users/'+b.dataset.ban+'/ban', { banned: !banned });
+      toast(banned?'Unbanned':'Banned', 'success'); render('users');
+    });
+  }
+
+  // Settings
+  async function renderSettings() {
+    const { settings: s } = await API.get('/api/admin/settings');
+    const qr = s['pay.qr_url'] || '';
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Settings</h2>
+      <div class="card">
+        <form id="sForm">
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+            <div class="field"><label>Site Name</label><input name="site.name" value="${esc(s['site.name']||'')}"></div>
+            <div class="field"><label>Site Tagline</label><input name="site.tagline" value="${esc(s['site.tagline']||'')}"></div>
+          </div>
+          <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+            <div class="field"><label>UPI ID</label><input name="pay.upi_id" value="${esc(s['pay.upi_id']||'')}"></div>
+            <div class="field"><label>Payee Name</label><input name="pay.name" value="${esc(s['pay.name']||'')}"></div>
+            <div class="field"><label>Min Deposit ₹</label><input type="number" name="pay.min_deposit" value="${esc(s['pay.min_deposit']||'10')}"></div>
+            <div class="field"><label>QR Image URL</label><input name="pay.qr_url" value="${esc(qr)}" placeholder="/uploads/… or https://…"></div>
+          </div>
+          <div class="field"><label>Upload QR Image (overrides URL)</label><input type="file" name="qr_file" accept="image/*"></div>
+          <div class="field"><label>Payment Instructions</label><textarea name="pay.instructions">${esc(s['pay.instructions']||'')}</textarea></div>
+          <button class="btn primary">Save Settings</button>
+        </form>
+        ${qr ? `<div style="margin-top:16px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Current QR</div><img src="${esc(qr)}" style="width:160px;border-radius:10px;background:#fff;padding:6px"></div>`:''}
+      </div>`;
+    document.getElementById('sForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      for (const [k,v] of [...fd.entries()]) if (v === '') fd.delete(k);
+      try { await API.putForm('/api/admin/settings', fd);
+        toast('Saved','success'); render('settings');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+  }
+
+  // Admins (owner)
+  async function renderAdmins() {
+    const { admins } = await API.get('/api/admin/admins');
+    panel.innerHTML = `
+      <h2 style="margin:0 0 14px">Admin Management</h2>
+      <div class="card" style="margin-bottom:16px">
+        <h4 style="margin:0 0 10px">Create Admin</h4>
+        <form id="aForm" class="grid" style="grid-template-columns:2fr 2fr 1fr auto;gap:10px;align-items:end">
+          <div class="field" style="margin:0"><label>Email</label><input name="email" type="email" required></div>
+          <div class="field" style="margin:0"><label>Password</label><input name="password" required minlength="6"></div>
+          <div class="field" style="margin:0"><label>IGN</label><input name="ign"></div>
+          <button class="btn primary">Create</button>
+        </form>
+      </div>
+      <div class="card">
+        <table class="tbl"><thead><tr><th>#</th><th>Email</th><th>IGN</th><th>Role</th><th>Created</th><th></th></tr></thead><tbody>
+          ${admins.map(a => `<tr>
+            <td>${a.id}</td>
+            <td>${esc(a.email)}</td>
+            <td>${esc(a.ign||'')}</td>
+            <td><span class="badge ${a.role==='owner'?'danger':'warn'}">${a.role}</span></td>
+            <td style="color:var(--muted);font-size:12px">${fmtTime(a.created_at)}</td>
+            <td>${a.role!=='owner'?`<button class="btn sm danger" data-del="${a.id}">Remove</button>`:''}</td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`;
+    document.getElementById('aForm').onsubmit = async (e) => {
+      e.preventDefault();
+      try { await API.post('/api/admin/admins', Object.fromEntries(new FormData(e.target)));
+        toast('Admin created','success'); render('admins');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    panel.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('Demote this admin?')) return;
+      await API.del('/api/admin/admins/'+b.dataset.del);
+      render('admins');
+    });
+  }
+
+  sideBtns.forEach(b => b.onclick = () => render(b.dataset.tab));
+  render('dash');
+})();
+</script>
+</body>
+</html>
